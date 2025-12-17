@@ -74,6 +74,11 @@ func (s *Service) StartVerification(userID, callbackURL string) (*Session, error
 		log.Printf("Removing existing active session %s for user %s", existingSession.ID, userID)
 		s.sessionStore.Delete(existingSession.ID)
 
+		// Clean up local friend status for the old session
+		s.friendsMutex.Lock()
+		delete(s.friends, userID)
+		s.friendsMutex.Unlock()
+
 		// Send expiration webhook for the old session if it has a callback URL
 		if existingSession.CallbackURL != "" {
 			go s.sendWebhook(existingSession, "expired")
@@ -294,6 +299,11 @@ func (s *Service) monitorChatMessages() {
 				session.Verified = true
 				log.Printf("User %s verified successfully!", session.Username)
 
+				// Clean up local friend status after successful verification
+				s.friendsMutex.Lock()
+				delete(s.friends, session.Username)
+				s.friendsMutex.Unlock()
+
 				// Send webhook notification
 				if session.CallbackURL != "" {
 					go s.sendWebhook(session, "verified")
@@ -387,12 +397,18 @@ func (s *Service) monitorExpiredSessions() {
 	}
 	s.sessionStore.mutex.RUnlock()
 
-	// Send webhook notifications for expired sessions
+	// Send webhook notifications for expired sessions and cleanup local friends
 	for _, session := range expiredSessions {
 		if session.CallbackURL != "" {
 			log.Printf("Sending expiration webhook for session %s", session.ID)
 			go s.sendWebhook(session, "expired")
 		}
+
+		// Clean up local friend status for expired sessions
+		s.friendsMutex.Lock()
+		delete(s.friends, session.Username)
+		s.friendsMutex.Unlock()
+		log.Printf("Cleaned up local friend status for expired session user %s", session.Username)
 	}
 }
 
