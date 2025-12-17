@@ -36,6 +36,9 @@ func main() {
 
 	router := gin.New()
 
+	// Disable proxy trust since we're not using any proxies
+	router.SetTrustedProxies(nil)
+
 	api.SetupMiddleware(router)
 
 	v1 := router.Group("/api/v1")
