@@ -5,10 +5,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"time"
 )
+
+type Logger interface {
+	Printf(format string, v ...interface{})
+}
 
 type Client interface {
 	Login() error
@@ -23,26 +26,28 @@ type HTTPClient struct {
 	httpClient *http.Client
 	baseURL    string
 	ncfaToken  string
+	logger     Logger
 }
 
-func NewClient(ncfaToken string) *HTTPClient {
+func NewClient(ncfaToken string, logger Logger) *HTTPClient {
 	return &HTTPClient{
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},
 		baseURL:   "https://www.geoguessr.com/api/v3",
 		ncfaToken: ncfaToken,
+		logger:    logger,
 	}
 }
 
 func (c *HTTPClient) Login() error {
 	// No login needed when using NCFA token
-	log.Printf("Using NCFA token authentication")
+	c.logger.Printf("Using NCFA token authentication")
 	return nil
 }
 
 func (c *HTTPClient) IsFriend(userID string) (bool, error) {
-	log.Printf("Checking if user %s is a friend", userID)
+	c.logger.Printf("Checking if user %s is a friend", userID)
 
 	// Get friends list
 	url := fmt.Sprintf("%s/social/friends", c.baseURL)
@@ -65,7 +70,7 @@ func (c *HTTPClient) IsFriend(userID string) (bool, error) {
 	defer resp.Body.Close()
 
 	body, _ := io.ReadAll(resp.Body)
-	log.Printf("Friends list response: %d - %s", resp.StatusCode, string(body))
+	c.logger.Printf("Friends list response: %d - %s", resp.StatusCode, string(body))
 
 	if resp.StatusCode != http.StatusOK {
 		return false, fmt.Errorf("failed to get friends list with status %d: %s", resp.StatusCode, string(body))
@@ -88,7 +93,7 @@ func (c *HTTPClient) IsFriend(userID string) (bool, error) {
 }
 
 func (c *HTTPClient) GetPendingFriendRequests() ([]string, error) {
-	log.Printf("Getting pending friend requests")
+	c.logger.Printf("Getting pending friend requests")
 
 	url := fmt.Sprintf("%s/social/friends/received", c.baseURL)
 	req, err := http.NewRequest("GET", url, nil)
@@ -110,7 +115,7 @@ func (c *HTTPClient) GetPendingFriendRequests() ([]string, error) {
 	defer resp.Body.Close()
 
 	body, _ := io.ReadAll(resp.Body)
-	log.Printf("Pending friend requests response: %d - %s", resp.StatusCode, string(body))
+	c.logger.Printf("Pending friend requests response: %d - %s", resp.StatusCode, string(body))
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("failed to get pending friend requests with status %d: %s", resp.StatusCode, string(body))
@@ -127,12 +132,12 @@ func (c *HTTPClient) GetPendingFriendRequests() ([]string, error) {
 		userIDs = append(userIDs, request.UserID)
 	}
 
-	log.Printf("Found %d pending friend requests: %v", len(userIDs), userIDs)
+	c.logger.Printf("Found %d pending friend requests: %v", len(userIDs), userIDs)
 	return userIDs, nil
 }
 
 func (c *HTTPClient) AcceptFriendRequest(userID string) error {
-	log.Printf("Accepting friend request from user: %s", userID)
+	c.logger.Printf("Accepting friend request from user: %s", userID)
 
 	// Correct endpoint for accepting friend requests
 	url := fmt.Sprintf("%s/social/friends/%s?context=", c.baseURL, userID)
@@ -157,18 +162,18 @@ func (c *HTTPClient) AcceptFriendRequest(userID string) error {
 	defer resp.Body.Close()
 
 	body, _ := io.ReadAll(resp.Body)
-	log.Printf("Accept friend request response: %d - %s", resp.StatusCode, string(body))
+	c.logger.Printf("Accept friend request response: %d - %s", resp.StatusCode, string(body))
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
 		return fmt.Errorf("failed to accept friend request with status %d: %s", resp.StatusCode, string(body))
 	}
 
-	log.Printf("Successfully accepted friend request from %s", userID)
+	c.logger.Printf("Successfully accepted friend request from %s", userID)
 	return nil
 }
 
 func (c *HTTPClient) ReadChatMessages(userID string) ([]ChatMessage, error) {
-	log.Printf("Reading chat messages from user: %s", userID)
+	c.logger.Printf("Reading chat messages from user: %s", userID)
 
 	// Use v4 chat API
 	url := fmt.Sprintf("https://www.geoguessr.com/api/v4/chat/%s", userID)
@@ -192,7 +197,7 @@ func (c *HTTPClient) ReadChatMessages(userID string) ([]ChatMessage, error) {
 	defer resp.Body.Close()
 
 	body, _ := io.ReadAll(resp.Body)
-	log.Printf("Chat messages response: %d - %s", resp.StatusCode, string(body))
+	c.logger.Printf("Chat messages response: %d - %s", resp.StatusCode, string(body))
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("failed to read chat messages with status %d: %s", resp.StatusCode, string(body))

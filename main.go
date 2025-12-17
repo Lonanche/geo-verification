@@ -7,26 +7,29 @@ import (
 	"github.com/lonanche/geo-verification/config"
 	"github.com/lonanche/geo-verification/internal/api"
 	"github.com/lonanche/geo-verification/internal/geoguessr"
+	"github.com/lonanche/geo-verification/internal/logger"
 	"github.com/lonanche/geo-verification/internal/verification"
 )
 
 func main() {
+	appLogger := logger.New("geo-verification")
 	cfg := config.Load()
 
 	if cfg.GeoGuessrNcfaToken == "" {
-		log.Fatal("GEOGUESSR_NCFA_TOKEN environment variable must be set")
+		log.Fatal("[geo-verification] GEOGUESSR_NCFA_TOKEN environment variable must be set")
 	}
 
-	geoClient := geoguessr.NewClient(cfg.GeoGuessrNcfaToken)
+	geoClient := geoguessr.NewClient(cfg.GeoGuessrNcfaToken, appLogger)
 
 	if err := geoClient.Login(); err != nil {
-		log.Fatalf("Failed to login to GeoGuessr: %v", err)
+		appLogger.Fatalf("Failed to login to GeoGuessr: %v", err)
 	}
 
 	verificationService := verification.NewService(
 		geoClient,
 		cfg.RateLimitPerHour,
 		cfg.CodeExpiryDuration(),
+		appLogger,
 	)
 
 	handler := api.NewHandler(verificationService)
@@ -43,11 +46,11 @@ func main() {
 
 	router.GET("/health", handler.HealthCheck)
 
-	log.Printf("Starting GeoGuessr verification service on port %s", cfg.Port)
-	log.Printf("Rate limit: %d requests per hour per user", cfg.RateLimitPerHour)
-	log.Printf("Code expiry: %d minutes", cfg.CodeExpiryMinutes)
+	appLogger.Printf("Starting GeoGuessr verification service on port %s", cfg.Port)
+	appLogger.Printf("Rate limit: %d requests per hour per user", cfg.RateLimitPerHour)
+	appLogger.Printf("Code expiry: %d minutes", cfg.CodeExpiryMinutes)
 
 	if err := router.Run(":" + cfg.Port); err != nil {
-		log.Fatalf("Failed to start server: %v", err)
+		appLogger.Fatalf("Failed to start server: %v", err)
 	}
 }

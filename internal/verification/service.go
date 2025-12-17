@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
 	"net/url"
 	"strings"
@@ -14,6 +13,10 @@ import (
 	"github.com/lonanche/geo-verification/internal/geoguessr"
 	"golang.org/x/time/rate"
 )
+
+type Logger interface {
+	Printf(format string, v ...interface{})
+}
 
 type Service struct {
 	sessionStore  *SessionStore
@@ -25,6 +28,7 @@ type Service struct {
 	httpClient    *http.Client
 	friends       map[string]bool // Track accepted friends locally
 	friendsMutex  sync.RWMutex
+	logger        Logger
 }
 
 type CallbackPayload struct {
@@ -34,7 +38,7 @@ type CallbackPayload struct {
 	Timestamp string `json:"timestamp"`
 }
 
-func NewService(geoClient geoguessr.Client, rateLimitPerHour int, expiryMinutes time.Duration) *Service {
+func NewService(geoClient geoguessr.Client, rateLimitPerHour int, expiryMinutes time.Duration, logger Logger) *Service {
 	rateLimitRate := rate.Limit(float64(rateLimitPerHour) / 3600.0)
 
 	service := &Service{
@@ -47,6 +51,7 @@ func NewService(geoClient geoguessr.Client, rateLimitPerHour int, expiryMinutes 
 			Timeout: 10 * time.Second,
 		},
 		friends: make(map[string]bool),
+		logger:  logger,
 	}
 
 	// Start background services
@@ -71,7 +76,7 @@ func (s *Service) StartVerification(userID, callbackURL string) (*Session, error
 
 	// Check for existing active session and remove it
 	if existingSession := s.getActiveSession(userID); existingSession != nil {
-		log.Printf("Removing existing active session %s for user %s", existingSession.ID, userID)
+		s.logger.Printf("Removing existing active session %s for user %s", existingSession.ID, userID)
 		s.sessionStore.Delete(existingSession.ID)
 
 		// Clean up local friend status for the old session
@@ -93,7 +98,7 @@ func (s *Service) StartVerification(userID, callbackURL string) (*Session, error
 	// Check if user has added us as friend
 	isFriend, err := s.geoClient.IsFriend(userID)
 	if err != nil {
-		log.Printf("Could not check friend status for %s: %v", userID, err)
+		s.logger.Printf("Could not check friend status for %s: %v", userID, err)
 		s.sessionStore.Delete(session.ID)
 		return nil, fmt.Errorf("failed to check friend status: %w", err)
 	}
@@ -101,7 +106,7 @@ func (s *Service) StartVerification(userID, callbackURL string) (*Session, error
 	if !isFriend {
 		// User is not friends yet - return session with code for them to send
 		// Background service will auto-accept friend request when they send it
-		log.Printf("User %s not friends yet, session created with code for them to send", userID)
+		s.logger.Printf("User %s not friends yet, session created with code for them to send", userID)
 		sessionResponse := &Session{
 			ID:        session.ID,
 			Username:  session.Username,
@@ -114,7 +119,7 @@ func (s *Service) StartVerification(userID, callbackURL string) (*Session, error
 	}
 
 	// If we're already friends, user can immediately start sending the code
-	log.Printf("User %s is already friends, can start verification immediately", userID)
+	s.logger.Printf("User %s is already friends, can start verification immediately", userID)
 
 	// Mark user as friend locally since they're already a friend
 	s.friendsMutex.Lock()
@@ -151,7 +156,7 @@ func (s *Service) GetSessionStatus(sessionID string) (*Session, error) {
 }
 
 func (s *Service) startFriendRequestAcceptanceService() {
-	log.Printf("Starting background friend request acceptance service")
+	s.logger.Printf("Starting background friend request acceptance service")
 
 	ticker := time.NewTicker(30 * time.Second) // Poll every 30 seconds
 	defer ticker.Stop()
@@ -172,7 +177,7 @@ func (s *Service) processPendingFriendRequests() {
 	// Get pending friend requests
 	pendingRequests, err := s.geoClient.GetPendingFriendRequests()
 	if err != nil {
-		log.Printf("Error getting pending friend requests: %v", err)
+		s.logger.Printf("Error getting pending friend requests: %v", err)
 		return
 	}
 
@@ -180,16 +185,16 @@ func (s *Service) processPendingFriendRequests() {
 		return
 	}
 
-	log.Printf("Found %d pending friend requests", len(pendingRequests))
+	s.logger.Printf("Found %d pending friend requests", len(pendingRequests))
 
 	// Check which users have active verification sessions
 	for _, userID := range pendingRequests {
 		if s.hasActiveSession(userID) {
-			log.Printf("User %s has active verification session, accepting friend request", userID)
+			s.logger.Printf("User %s has active verification session, accepting friend request", userID)
 			if err := s.geoClient.AcceptFriendRequest(userID); err != nil {
-				log.Printf("Error accepting friend request from %s: %v", userID, err)
+				s.logger.Printf("Error accepting friend request from %s: %v", userID, err)
 			} else {
-				log.Printf("Successfully accepted friend request from %s", userID)
+				s.logger.Printf("Successfully accepted friend request from %s", userID)
 
 				// Mark user as friend locally
 				s.friendsMutex.Lock()
@@ -197,10 +202,10 @@ func (s *Service) processPendingFriendRequests() {
 				s.friendsMutex.Unlock()
 
 				// Friend request accepted - user can now send their verification code
-				log.Printf("Friend request accepted for %s, user can now send verification code", userID)
+				s.logger.Printf("Friend request accepted for %s, user can now send verification code", userID)
 			}
 		} else {
-			log.Printf("User %s has no active verification session, skipping friend request", userID)
+			s.logger.Printf("User %s has no active verification session, skipping friend request", userID)
 		}
 	}
 }
@@ -230,7 +235,7 @@ func (s *Service) getActiveSession(userID string) *Session {
 }
 
 func (s *Service) startChatMonitoringService() {
-	log.Printf("Starting background chat monitoring service")
+	s.logger.Printf("Starting background chat monitoring service")
 
 	ticker := time.NewTicker(30 * time.Second) // Poll every 30 seconds
 	defer ticker.Stop()
@@ -265,12 +270,12 @@ func (s *Service) monitorChatMessages() {
 		if err != nil {
 			// Check if it's a 404 error (user might not be friend anymore)
 			if strings.Contains(err.Error(), "404") {
-				log.Printf("Got 404 reading chat from %s, checking actual friend status via API", session.Username)
+				s.logger.Printf("Got 404 reading chat from %s, checking actual friend status via API", session.Username)
 
 				// Check API to see if user is still a friend
 				isFriend, apiErr := s.geoClient.IsFriend(session.Username)
 				if apiErr != nil {
-					log.Printf("Error checking friend status for %s: %v", session.Username, apiErr)
+					s.logger.Printf("Error checking friend status for %s: %v", session.Username, apiErr)
 				} else {
 					// Update local friend status based on API response
 					s.friendsMutex.Lock()
@@ -278,13 +283,13 @@ func (s *Service) monitorChatMessages() {
 					s.friendsMutex.Unlock()
 
 					if !isFriend {
-						log.Printf("User %s is no longer a friend, updated local status", session.Username)
+						s.logger.Printf("User %s is no longer a friend, updated local status", session.Username)
 					} else {
-						log.Printf("User %s is still a friend according to API, but chat read failed", session.Username)
+						s.logger.Printf("User %s is still a friend according to API, but chat read failed", session.Username)
 					}
 				}
 			} else {
-				log.Printf("Error reading chat messages from %s: %v", session.Username, err)
+				s.logger.Printf("Error reading chat messages from %s: %v", session.Username, err)
 			}
 			continue
 		}
@@ -293,11 +298,11 @@ func (s *Service) monitorChatMessages() {
 		for _, message := range messages {
 			// Only check messages from the user to us (not our messages to them)
 			if message.SourceID == session.Username && message.TextPayload == session.Code {
-				log.Printf("Verification code received from %s: %s", session.Username, session.Code)
+				s.logger.Printf("Verification code received from %s: %s", session.Username, session.Code)
 
 				// Mark session as verified
 				session.Verified = true
-				log.Printf("User %s verified successfully!", session.Username)
+				s.logger.Printf("User %s verified successfully!", session.Username)
 
 				// Clean up local friend status after successful verification
 				s.friendsMutex.Lock()
@@ -347,13 +352,13 @@ func (s *Service) sendWebhook(session *Session, status string) {
 
 	jsonPayload, err := json.Marshal(payload)
 	if err != nil {
-		log.Printf("Error marshaling webhook payload for session %s: %v", session.ID, err)
+		s.logger.Printf("Error marshaling webhook payload for session %s: %v", session.ID, err)
 		return
 	}
 
 	req, err := http.NewRequest("POST", session.CallbackURL, bytes.NewBuffer(jsonPayload))
 	if err != nil {
-		log.Printf("Error creating webhook request for session %s: %v", session.ID, err)
+		s.logger.Printf("Error creating webhook request for session %s: %v", session.ID, err)
 		return
 	}
 
@@ -362,20 +367,20 @@ func (s *Service) sendWebhook(session *Session, status string) {
 
 	resp, err := s.httpClient.Do(req)
 	if err != nil {
-		log.Printf("Error sending webhook for session %s to %s: %v", session.ID, session.CallbackURL, err)
+		s.logger.Printf("Error sending webhook for session %s to %s: %v", session.ID, session.CallbackURL, err)
 		return
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-		log.Printf("Webhook sent successfully for session %s (%s)", session.ID, status)
+		s.logger.Printf("Webhook sent successfully for session %s (%s)", session.ID, status)
 	} else {
-		log.Printf("Webhook failed for session %s: HTTP %d", session.ID, resp.StatusCode)
+		s.logger.Printf("Webhook failed for session %s: HTTP %d", session.ID, resp.StatusCode)
 	}
 }
 
 func (s *Service) startExpirationMonitoringService() {
-	log.Printf("Starting background session expiration monitoring service")
+	s.logger.Printf("Starting background session expiration monitoring service")
 
 	ticker := time.NewTicker(30 * time.Second) // Check every 30 seconds
 	defer ticker.Stop()
@@ -400,7 +405,7 @@ func (s *Service) monitorExpiredSessions() {
 	// Send webhook notifications for expired sessions and cleanup local friends
 	for _, session := range expiredSessions {
 		if session.CallbackURL != "" {
-			log.Printf("Sending expiration webhook for session %s", session.ID)
+			s.logger.Printf("Sending expiration webhook for session %s", session.ID)
 			go s.sendWebhook(session, "expired")
 		}
 
@@ -408,7 +413,7 @@ func (s *Service) monitorExpiredSessions() {
 		s.friendsMutex.Lock()
 		delete(s.friends, session.Username)
 		s.friendsMutex.Unlock()
-		log.Printf("Cleaned up local friend status for expired session user %s", session.Username)
+		s.logger.Printf("Cleaned up local friend status for expired session user %s", session.Username)
 	}
 }
 
