@@ -152,6 +152,13 @@ func (s *Service) startFriendRequestAcceptanceService() {
 }
 
 func (s *Service) processPendingFriendRequests() {
+	// Check if there are any active sessions first
+	activeSessions := s.getActiveSessions()
+	if len(activeSessions) == 0 {
+		// No active verification sessions, skip checking friend requests
+		return
+	}
+
 	// Get pending friend requests
 	pendingRequests, err := s.geoClient.GetPendingFriendRequests()
 	if err != nil {
@@ -226,6 +233,11 @@ func (s *Service) startChatMonitoringService() {
 func (s *Service) monitorChatMessages() {
 	// Get all active sessions
 	activeSessions := s.getActiveSessions()
+
+	// If no active sessions, skip chat monitoring
+	if len(activeSessions) == 0 {
+		return
+	}
 
 	for _, session := range activeSessions {
 		if session.Verified {
