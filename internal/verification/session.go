@@ -68,7 +68,6 @@ func (s *SessionStore) Get(sessionID string) (*Session, bool) {
 	return session, true
 }
 
-
 func (s *SessionStore) Delete(sessionID string) {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()

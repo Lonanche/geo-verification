@@ -41,8 +41,6 @@ func (c *HTTPClient) Login() error {
 	return nil
 }
 
-
-
 func (c *HTTPClient) IsFriend(userID string) (bool, error) {
 	log.Printf("Checking if user %s is a friend", userID)
 

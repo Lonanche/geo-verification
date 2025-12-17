@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -22,6 +23,8 @@ type Service struct {
 	rateLimitRate rate.Limit
 	expiryTime    time.Duration
 	httpClient    *http.Client
+	friends       map[string]bool // Track accepted friends locally
+	friendsMutex  sync.RWMutex
 }
 
 type CallbackPayload struct {
@@ -43,6 +46,7 @@ func NewService(geoClient geoguessr.Client, rateLimitPerHour int, expiryMinutes 
 		httpClient: &http.Client{
 			Timeout: 10 * time.Second,
 		},
+		friends: make(map[string]bool),
 	}
 
 	// Start background services
@@ -119,7 +123,6 @@ func (s *Service) StartVerification(userID, callbackURL string) (*Session, error
 	return sessionResponse, nil
 }
 
-
 func (s *Service) GetSessionStatus(sessionID string) (*Session, error) {
 	session, exists := s.sessionStore.Get(sessionID)
 	if !exists {
@@ -136,7 +139,6 @@ func (s *Service) GetSessionStatus(sessionID string) (*Session, error) {
 
 	return sessionResponse, nil
 }
-
 
 func (s *Service) startFriendRequestAcceptanceService() {
 	log.Printf("Starting background friend request acceptance service")
@@ -171,6 +173,11 @@ func (s *Service) processPendingFriendRequests() {
 				log.Printf("Error accepting friend request from %s: %v", userID, err)
 			} else {
 				log.Printf("Successfully accepted friend request from %s", userID)
+
+				// Mark user as friend locally
+				s.friendsMutex.Lock()
+				s.friends[userID] = true
+				s.friendsMutex.Unlock()
 
 				// Friend request accepted - user can now send their verification code
 				log.Printf("Friend request accepted for %s, user can now send verification code", userID)
@@ -225,10 +232,38 @@ func (s *Service) monitorChatMessages() {
 			continue // Skip already verified sessions
 		}
 
+		// Check if user is a friend locally before trying to read chat messages
+		if !s.isLocalFriend(session.Username) {
+			// User is not a friend yet, skip reading chat messages
+			continue
+		}
+
 		// Read chat messages from this user
 		messages, err := s.geoClient.ReadChatMessages(session.Username)
 		if err != nil {
-			log.Printf("Error reading chat messages from %s: %v", session.Username, err)
+			// Check if it's a 404 error (user might not be friend anymore)
+			if strings.Contains(err.Error(), "404") {
+				log.Printf("Got 404 reading chat from %s, checking actual friend status via API", session.Username)
+
+				// Check API to see if user is still a friend
+				isFriend, apiErr := s.geoClient.IsFriend(session.Username)
+				if apiErr != nil {
+					log.Printf("Error checking friend status for %s: %v", session.Username, apiErr)
+				} else {
+					// Update local friend status based on API response
+					s.friendsMutex.Lock()
+					s.friends[session.Username] = isFriend
+					s.friendsMutex.Unlock()
+
+					if !isFriend {
+						log.Printf("User %s is no longer a friend, updated local status", session.Username)
+					} else {
+						log.Printf("User %s is still a friend according to API, but chat read failed", session.Username)
+					}
+				}
+			} else {
+				log.Printf("Error reading chat messages from %s: %v", session.Username, err)
+			}
 			continue
 		}
 
@@ -263,6 +298,12 @@ func (s *Service) getActiveSessions() []*Session {
 		}
 	}
 	return activeSessions
+}
+
+func (s *Service) isLocalFriend(userID string) bool {
+	s.friendsMutex.RLock()
+	defer s.friendsMutex.RUnlock()
+	return s.friends[userID]
 }
 
 func (s *Service) sendWebhook(session *Session, status string) {

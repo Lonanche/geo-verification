@@ -29,7 +29,6 @@ type StartVerificationResponse struct {
 	Message          string `json:"message"`
 }
 
-
 type ErrorResponse struct {
 	Error   string `json:"error"`
 	Message string `json:"message,omitempty"`
@@ -73,7 +72,6 @@ func (h *Handler) StartVerification(c *gin.Context) {
 	})
 }
 
-
 func (h *Handler) GetVerificationStatus(c *gin.Context) {
 	sessionID := c.Param("session_id")
 	if sessionID == "" {
@@ -103,7 +101,6 @@ func (h *Handler) GetVerificationStatus(c *gin.Context) {
 
 	c.JSON(http.StatusOK, response)
 }
-
 
 func (h *Handler) HealthCheck(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{

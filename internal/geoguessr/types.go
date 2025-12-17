@@ -1,6 +1,5 @@
 package geoguessr
 
-
 type Friend struct {
 	UserID string `json:"userId"`
 	Nick   string `json:"nick"`
@@ -14,14 +13,14 @@ type PendingFriendRequest struct {
 }
 
 type ChatMessage struct {
-	ID           string `json:"id"`
-	PayloadType  string `json:"payloadType"`
-	TextPayload  string `json:"textPayload"`
-	SourceType   string `json:"sourceType"`
-	SourceID     string `json:"sourceId"`
-	RecipientID  string `json:"recipientId"`
-	SentAt       string `json:"sentAt"`
-	RoomID       string `json:"roomId"`
+	ID          string `json:"id"`
+	PayloadType string `json:"payloadType"`
+	TextPayload string `json:"textPayload"`
+	SourceType  string `json:"sourceType"`
+	SourceID    string `json:"sourceId"`
+	RecipientID string `json:"recipientId"`
+	SentAt      string `json:"sentAt"`
+	RoomID      string `json:"roomId"`
 }
 
 type ChatResponse struct {
