@@ -10,10 +10,11 @@ import (
 )
 
 type Config struct {
-	Port               string
-	GeoGuessrNcfaToken string
-	CodeExpiryMinutes  int
-	RateLimitPerHour   int
+	Port                 string
+	GeoGuessrNcfaToken   string
+	CodeExpiryMinutes    int
+	RateLimitPerHour     int
+	AllowedCallbackHosts string
 }
 
 func Load() *Config {
@@ -23,10 +24,11 @@ func Load() *Config {
 	}
 
 	return &Config{
-		Port:               getEnv("PORT", "8080"),
-		GeoGuessrNcfaToken: getEnv("GEOGUESSR_NCFA_TOKEN", ""),
-		CodeExpiryMinutes:  getEnvInt("CODE_EXPIRY_MINUTES", 5),
-		RateLimitPerHour:   getEnvInt("RATE_LIMIT_PER_HOUR", 3),
+		Port:                 getEnv("PORT", "8080"),
+		GeoGuessrNcfaToken:   getEnv("GEOGUESSR_NCFA_TOKEN", ""),
+		CodeExpiryMinutes:    getEnvInt("CODE_EXPIRY_MINUTES", 5),
+		RateLimitPerHour:     getEnvInt("RATE_LIMIT_PER_HOUR", 3),
+		AllowedCallbackHosts: getEnv("ALLOWED_CALLBACK_HOSTS", "localhost,127.0.0.1,::1"),
 	}
 }
 

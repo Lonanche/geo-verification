@@ -28,6 +28,7 @@ type Service struct {
 	httpClient    *http.Client
 	friends       map[string]bool // Track accepted friends locally
 	friendsMutex  sync.RWMutex
+	allowedHosts  map[string]bool // Allowed callback hosts
 	logger        Logger
 }
 
@@ -38,8 +39,17 @@ type CallbackPayload struct {
 	Timestamp string `json:"timestamp"`
 }
 
-func NewService(geoClient geoguessr.Client, rateLimitPerHour int, expiryMinutes time.Duration, logger Logger) *Service {
+func NewService(geoClient geoguessr.Client, rateLimitPerHour int, expiryMinutes time.Duration, allowedCallbackHosts string, logger Logger) *Service {
 	rateLimitRate := rate.Limit(float64(rateLimitPerHour) / 3600.0)
+
+	// Parse allowed hosts from comma-separated string
+	allowedHostsMap := make(map[string]bool)
+	if allowedCallbackHosts != "" {
+		hosts := strings.Split(allowedCallbackHosts, ",")
+		for _, host := range hosts {
+			allowedHostsMap[strings.TrimSpace(host)] = true
+		}
+	}
 
 	service := &Service{
 		sessionStore:  NewSessionStore(),
@@ -50,8 +60,9 @@ func NewService(geoClient geoguessr.Client, rateLimitPerHour int, expiryMinutes 
 		httpClient: &http.Client{
 			Timeout: 10 * time.Second,
 		},
-		friends: make(map[string]bool),
-		logger:  logger,
+		friends:      make(map[string]bool),
+		allowedHosts: allowedHostsMap,
+		logger:       logger,
 	}
 
 	// Start background services
@@ -433,14 +444,12 @@ func (s *Service) validateCallbackURL(callbackURL string) error {
 		return fmt.Errorf("hostname required")
 	}
 
-	// Allow localhost for development/testing
-	if host == "localhost" || host == "127.0.0.1" || host == "::1" {
+	// Check if host is in allowed list
+	if s.allowedHosts[host] {
 		return nil
 	}
 
-	// For production use, comment out this check to allow external URLs
-	// WARNING: This may expose internal services to SSRF attacks
-	return fmt.Errorf("only localhost allowed (modify validateCallbackURL() for production)")
+	return fmt.Errorf("callback host '%s' not allowed. Configure ALLOWED_CALLBACK_HOSTS environment variable", host)
 }
 
 func (s *Service) checkRateLimit(username string) bool {

@@ -29,6 +29,7 @@ func main() {
 		geoClient,
 		cfg.RateLimitPerHour,
 		cfg.CodeExpiryDuration(),
+		cfg.AllowedCallbackHosts,
 		appLogger,
 	)
 
