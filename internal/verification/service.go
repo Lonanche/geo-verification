@@ -111,6 +111,11 @@ func (s *Service) StartVerification(userID, callbackURL string) (*Session, error
 	// If we're already friends, user can immediately start sending the code
 	log.Printf("User %s is already friends, can start verification immediately", userID)
 
+	// Mark user as friend locally since they're already a friend
+	s.friendsMutex.Lock()
+	s.friends[userID] = true
+	s.friendsMutex.Unlock()
+
 	sessionResponse := &Session{
 		ID:        session.ID,
 		Username:  session.Username,
