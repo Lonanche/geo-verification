@@ -49,44 +49,52 @@ func (c *HTTPClient) Login() error {
 func (c *HTTPClient) IsFriend(userID string) (bool, error) {
 	c.logger.Printf("Checking if user %s is a friend", userID)
 
-	// Get friends list
-	url := fmt.Sprintf("%s/social/friends", c.baseURL)
-	req, err := http.NewRequest("GET", url, nil)
-	if err != nil {
-		return false, fmt.Errorf("failed to create request: %w", err)
-	}
+	const pageSize = 50
+	page := 0
 
-	// Set headers
-	req.Header.Set("Accept", "*/*")
-	req.Header.Set("Origin", "https://www.geoguessr.com")
-	req.Header.Set("Referer", "https://www.geoguessr.com/")
-	req.Header.Set("x-client", "web")
-	req.Header.Set("Cookie", fmt.Sprintf("_ncfa=%s", c.ncfaToken))
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return false, fmt.Errorf("failed to get friends list: %w", err)
-	}
-	defer resp.Body.Close()
-
-	body, _ := io.ReadAll(resp.Body)
-	c.logger.Printf("Friends list response: %d - %s", resp.StatusCode, string(body))
-
-	if resp.StatusCode != http.StatusOK {
-		return false, fmt.Errorf("failed to get friends list with status %d: %s", resp.StatusCode, string(body))
-	}
-
-	// Parse JSON response properly
-	var friends []Friend
-	if err := json.Unmarshal(body, &friends); err != nil {
-		return false, fmt.Errorf("failed to parse friends list: %w", err)
-	}
-
-	// Check if userID is in the friends list
-	for _, friend := range friends {
-		if friend.UserID == userID {
-			return true, nil
+	for {
+		url := fmt.Sprintf("%s/social/friends?count=%d&page=%d", c.baseURL, pageSize, page)
+		req, err := http.NewRequest("GET", url, nil)
+		if err != nil {
+			return false, fmt.Errorf("failed to create request: %w", err)
 		}
+
+		req.Header.Set("Accept", "*/*")
+		req.Header.Set("Origin", "https://www.geoguessr.com")
+		req.Header.Set("Referer", "https://www.geoguessr.com/")
+		req.Header.Set("x-client", "web")
+		req.Header.Set("Cookie", fmt.Sprintf("_ncfa=%s", c.ncfaToken))
+
+		resp, err := c.httpClient.Do(req)
+		if err != nil {
+			return false, fmt.Errorf("failed to get friends list: %w", err)
+		}
+
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+
+		c.logger.Printf("Friends list response (page %d): %d - %s", page, resp.StatusCode, string(body))
+
+		if resp.StatusCode != http.StatusOK {
+			return false, fmt.Errorf("failed to get friends list with status %d: %s", resp.StatusCode, string(body))
+		}
+
+		var friends []Friend
+		if err := json.Unmarshal(body, &friends); err != nil {
+			return false, fmt.Errorf("failed to parse friends list: %w", err)
+		}
+
+		for _, friend := range friends {
+			if friend.UserID == userID {
+				return true, nil
+			}
+		}
+
+		if len(friends) < pageSize {
+			break
+		}
+		time.Sleep(time.Second)
+		page++
 	}
 
 	return false, nil
