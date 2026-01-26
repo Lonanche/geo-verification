@@ -1,32 +1,4 @@
-# Binaries
-geo-verification
-*.exe
-*.dll
-*.so
-*.dylib
-
-# Test binary, built with `go test -c`
-*.test
-
-# Output of the go coverage tool
-*.out
-
-# Dependency directories
-vendor/
-
-# Go workspace file
-go.work
-
-# Environment variables
-.env
-.env.local
-
-# IDE files
-.idea/
-.vscode/
-*.swp
-*.swo
-
-# OS files
-.DS_Store
-Thumbs.db
+node_modules/
+dist/
+.dev.vars
+.wrangler/
