@@ -1,0 +1,210 @@
+openapi: 3.0.3
+info:
+  title: GeoGuessr Verification API
+  description: |
+    A verification service that confirms GeoGuessr users by validating verification codes sent via direct messages.
+
+    ## How it works
+    1. Start a verification session with a GeoGuessr user ID
+    2. User receives a 6-character verification code
+    3. User sends friend request to the bot account
+    4. User sends the verification code via GeoGuessr DM
+    5. Service monitors chat messages and verifies the code
+    6. Optional webhook callback when verification completes
+  version: 1.0.0
+  contact:
+    name: API Support
+    url: https://github.com/Lonanche/geo-verification
+
+security:
+  - ApiKeyAuth: []
+
+paths:
+  /health:
+    get:
+      summary: Health check endpoint
+      description: Check if the service is running
+      security: []
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+
+  /api/v1/verify/start:
+    post:
+      summary: Start verification session
+      description: Creates a new verification session for a GeoGuessr user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - user_id
+              properties:
+                user_id:
+                  type: string
+                  description: GeoGuessr user ID
+                  example: "62cd43c4973590185c127711"
+                callback_url:
+                  type: string
+                  format: uri
+                  description: Optional webhook URL to receive verification status updates
+                  example: "https://yourdomain.com/webhook"
+      responses:
+        '200':
+          description: Verification session created successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  session_id:
+                    type: string
+                    format: uuid
+                    description: Unique session identifier
+                    example: "550e8400-e29b-41d4-a716-446655440000"
+                  verification_code:
+                    type: string
+                    description: 6-character verification code to be sent via DM
+                    example: "ABC123"
+                  expires_at:
+                    type: string
+                    format: date-time
+                    description: Session expiration timestamp
+                    example: "2026-01-28T10:00:00.000Z"
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              examples:
+                missing_user_id:
+                  value:
+                    error: "user_id is required"
+                invalid_callback:
+                  value:
+                    error: "Invalid callback URL"
+        '401':
+          description: Unauthorized - Invalid or missing API key
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: "Unauthorized"
+        '429':
+          description: Rate limit exceeded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: "Rate limit exceeded. Try again after 2026-01-28T11:00:00.000Z"
+
+  /api/v1/verify/status/{session_id}:
+    get:
+      summary: Check verification status
+      description: Get the current status of a verification session
+      parameters:
+        - name: session_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Session ID returned from /verify/start
+          example: "550e8400-e29b-41d4-a716-446655440000"
+      responses:
+        '200':
+          description: Session status retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  session_id:
+                    type: string
+                    format: uuid
+                    example: "550e8400-e29b-41d4-a716-446655440000"
+                  user_id:
+                    type: string
+                    example: "62cd43c4973590185c127711"
+                  verified:
+                    type: boolean
+                    description: Whether the user has been verified
+                    example: true
+                  expires_at:
+                    type: string
+                    format: date-time
+                    example: "2026-01-28T10:00:00.000Z"
+                  created_at:
+                    type: string
+                    format: date-time
+                    example: "2026-01-28T09:00:00.000Z"
+        '401':
+          description: Unauthorized - Invalid or missing API key
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Session not found or expired
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: "Session not found or expired"
+
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: API key for authentication. Contact the service administrator to obtain a key.
+
+  schemas:
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+          description: Error message describing what went wrong
+      required:
+        - error
+
+    WebhookPayload:
+      type: object
+      description: Payload sent to callback_url when verification completes or expires
+      properties:
+        session_id:
+          type: string
+          format: uuid
+          example: "550e8400-e29b-41d4-a716-446655440000"
+        user_id:
+          type: string
+          example: "62cd43c4973590185c127711"
+        status:
+          type: string
+          enum: [verified, expired]
+          example: "verified"
+        timestamp:
+          type: string
+          format: date-time
+          example: "2026-01-28T09:05:00.000Z"
+      required:
+        - session_id
+        - user_id
+        - status
+        - timestamp
