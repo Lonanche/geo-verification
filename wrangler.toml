@@ -10,7 +10,7 @@ bindings = [
 
 [[migrations]]
 tag = "v1"
-new_classes = ["VerificationManager", "UserRateLimiter"]
+new_sqlite_classes = ["VerificationManager", "UserRateLimiter"]
 
 [vars]
 CODE_EXPIRY_MINUTES = "5"
