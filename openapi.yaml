@@ -11,6 +11,28 @@ info:
     4. User sends the verification code via GeoGuessr DM
     5. Service monitors chat messages and verifies the code
     6. Optional webhook callback when verification completes
+
+    ## Webhook Security
+    All webhooks include an HMAC-SHA256 signature in the `X-Webhook-Signature` header for verification.
+    The signature is computed using your API key as the secret.
+
+    **Verifying webhooks (Node.js example):**
+    ```javascript
+    const crypto = require('crypto');
+
+    function verifyWebhook(body, signature, apiKey) {
+      const expected = crypto
+        .createHmac('sha256', apiKey)
+        .update(body)
+        .digest('hex');
+      return signature === `sha256=${expected}`;
+    }
+
+    // In your webhook handler:
+    const signature = req.headers['x-webhook-signature'];
+    const isValid = verifyWebhook(JSON.stringify(req.body), signature, YOUR_API_KEY);
+    if (!isValid) return res.status(401).send('Invalid signature');
+    ```
   version: 1.0.0
   contact:
     name: API Support
@@ -186,7 +208,12 @@ components:
 
     WebhookPayload:
       type: object
-      description: Payload sent to callback_url when verification completes or expires
+      description: |
+        Payload sent to callback_url when verification completes or expires.
+
+        The webhook request includes an `X-Webhook-Signature` header containing
+        an HMAC-SHA256 signature of the JSON body, using your API key as the secret.
+        Format: `sha256=<hex-encoded-signature>`
       properties:
         session_id:
           type: string

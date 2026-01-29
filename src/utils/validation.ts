@@ -20,7 +20,15 @@ export function validateCallbackUrl(
   const allowedHostsList = allowedHosts.split(",").map((h) => h.trim().toLowerCase());
   const hostname = parsed.hostname.toLowerCase();
 
-  if (!allowedHostsList.includes(hostname)) {
+  const isAllowed = allowedHostsList.some((pattern) => {
+    if (pattern.startsWith("*.")) {
+      const domain = pattern.slice(2);
+      return hostname === domain || hostname.endsWith("." + domain);
+    }
+    return hostname === pattern;
+  });
+
+  if (!isAllowed) {
     return {
       valid: false,
       error: `Callback host '${hostname}' is not in allowed hosts list`,

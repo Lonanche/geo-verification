@@ -9,6 +9,7 @@ import {
 interface VerificationManagerEnv {
   GEOGUESSR_NCFA_TOKEN: string;
   CODE_EXPIRY_MINUTES: string;
+  API_KEY?: string;
 }
 
 export class VerificationManager implements DurableObject {
@@ -225,7 +226,7 @@ export class VerificationManager implements DurableObject {
               status: "verified",
               timestamp: new Date().toISOString(),
             };
-            await sendWebhook(session.callbackUrl, payload);
+            await sendWebhook(session.callbackUrl, payload, this.env.API_KEY);
           }
 
           await this.state.storage.delete(`friend:${session.userId}`);
@@ -251,7 +252,7 @@ export class VerificationManager implements DurableObject {
             status: "expired",
             timestamp: new Date().toISOString(),
           };
-          await sendWebhook(session.callbackUrl, payload);
+          await sendWebhook(session.callbackUrl, payload, this.env.API_KEY);
         }
 
         await this.state.storage.delete(key);
