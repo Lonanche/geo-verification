@@ -1,6 +1,7 @@
 name = "geo-verification"
 main = "src/index.ts"
 compatibility_date = "2024-11-01"
+keep_vars = true
 
 [durable_objects]
 bindings = [
@@ -12,11 +13,11 @@ bindings = [
 tag = "v1"
 new_sqlite_classes = ["VerificationManager", "UserRateLimiter"]
 
-[vars]
-CODE_EXPIRY_MINUTES = "5"
-RATE_LIMIT_PER_HOUR = "3"
-ALLOWED_CALLBACK_HOSTS = "localhost,127.0.0.1"
-
+# Variables set via Cloudflare Dashboard (keep_vars = true preserves them on deploy):
+# - CODE_EXPIRY_MINUTES
+# - RATE_LIMIT_PER_HOUR
+# - ALLOWED_CALLBACK_HOSTS
+#
 # Secrets (set via `wrangler secret put`):
 # - GEOGUESSR_NCFA_TOKEN (required)
-# - API_KEY (optional, if not set API is open)
+# - API_KEY (optional)
