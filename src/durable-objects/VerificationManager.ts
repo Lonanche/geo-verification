@@ -82,11 +82,6 @@ export class VerificationManager implements DurableObject {
     await this.state.storage.put(`session:${session.id}`, session);
     await this.state.storage.put(`session_by_user:${body.userId}`, session.id);
 
-    const isFriend = await this.getClient().isFriend(body.userId);
-    if (isFriend) {
-      await this.state.storage.put(`friend:${body.userId}`, true);
-    }
-
     await this.ensureAlarmScheduled();
 
     return Response.json(session);
@@ -202,9 +197,19 @@ export class VerificationManager implements DurableObject {
     const sessions = await this.getActiveSessions();
 
     for (const session of sessions) {
-      const isFriend = await this.state.storage.get<boolean>(
+      let isFriend = await this.state.storage.get<boolean>(
         `friend:${session.userId}`
       );
+
+      if (isFriend === undefined) {
+        isFriend = await client.isFriend(session.userId);
+        if (isFriend) {
+          await this.state.storage.put(`friend:${session.userId}`, true);
+        } else {
+          await this.state.storage.put(`friend:${session.userId}`, false);
+        }
+      }
+
       if (!isFriend) continue;
 
       const messages = await client.readChatMessages(session.userId);
