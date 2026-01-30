@@ -1,9 +1,6 @@
 import type { CallbackPayload } from "../types";
 
-async function generateSignature(
-  payload: string,
-  secret: string
-): Promise<string> {
+async function generateSignature(payload: string, secret: string): Promise<string> {
   const encoder = new TextEncoder();
   const key = await crypto.subtle.importKey(
     "raw",
@@ -13,8 +10,9 @@ async function generateSignature(
     ["sign"]
   );
   const signature = await crypto.subtle.sign("HMAC", key, encoder.encode(payload));
-  const hashArray = Array.from(new Uint8Array(signature));
-  return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
+  return [...new Uint8Array(signature)]
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
 }
 
 export async function sendWebhook(

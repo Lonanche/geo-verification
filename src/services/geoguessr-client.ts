@@ -24,7 +24,8 @@ export class GeoGuessrClient {
     };
   }
 
-  async isFriend(userId: string): Promise<boolean> {
+  async getAllFriendIds(): Promise<Set<string>> {
+    const friendIds = new Set<string>();
     const pageSize = 50;
     let page = 0;
 
@@ -37,13 +38,12 @@ export class GeoGuessrClient {
 
       if (!response.ok) {
         console.error(`[geoguessr] Failed to fetch friends: ${response.status}`);
-        return false;
+        return friendIds;
       }
 
       const friends = (await response.json()) as Friend[];
-
-      if (friends.some((f) => f.userId === userId)) {
-        return true;
+      for (const f of friends) {
+        friendIds.add(f.userId);
       }
 
       if (friends.length < pageSize) {
@@ -54,7 +54,7 @@ export class GeoGuessrClient {
       await this.delay(1000);
     }
 
-    return false;
+    return friendIds;
   }
 
   async getPendingFriendRequests(): Promise<PendingFriendRequest[]> {
@@ -80,7 +80,7 @@ export class GeoGuessrClient {
       signal: AbortSignal.timeout(30000),
     });
 
-    if (!response.ok && response.status !== 201) {
+    if (!response.ok) {
       console.error(`[geoguessr] Failed to accept friend request from ${userId}: ${response.status}`);
       return false;
     }

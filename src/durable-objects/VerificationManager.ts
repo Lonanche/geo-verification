@@ -31,22 +31,19 @@ export class VerificationManager implements DurableObject {
 
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
+    const { method, pathname } = { method: request.method, pathname: url.pathname };
 
-    if (request.method === "POST" && url.pathname === "/session") {
+    if (method === "POST" && pathname === "/session") {
       return this.createSession(request);
     }
 
-    if (request.method === "GET" && url.pathname.startsWith("/session/")) {
-      const sessionId = url.pathname.split("/")[2];
-      return this.getSession(sessionId);
+    if (pathname.startsWith("/session/")) {
+      const sessionId = pathname.split("/")[2];
+      if (method === "GET") return this.getSession(sessionId);
+      if (method === "DELETE") return this.deleteSession(sessionId);
     }
 
-    if (request.method === "DELETE" && url.pathname.startsWith("/session/")) {
-      const sessionId = url.pathname.split("/")[2];
-      return this.deleteSession(sessionId);
-    }
-
-    if (request.method === "POST" && url.pathname === "/start-alarm") {
+    if (method === "POST" && pathname === "/start-alarm") {
       return this.startAlarm();
     }
 
@@ -195,21 +192,31 @@ export class VerificationManager implements DurableObject {
   private async monitorChatMessages(): Promise<void> {
     const client = this.getClient();
     const sessions = await this.getActiveSessions();
+    if (sessions.length === 0) return;
+
+    const uncachedUserIds: string[] = [];
+    const friendStatus = new Map<string, boolean>();
 
     for (const session of sessions) {
-      let isFriend = await this.state.storage.get<boolean>(
-        `friend:${session.userId}`
-      );
-
-      if (isFriend === undefined) {
-        isFriend = await client.isFriend(session.userId);
-        if (isFriend) {
-          await this.state.storage.put(`friend:${session.userId}`, true);
-        } else {
-          await this.state.storage.put(`friend:${session.userId}`, false);
-        }
+      const cached = await this.state.storage.get<boolean>(`friend:${session.userId}`);
+      if (cached !== undefined) {
+        friendStatus.set(session.userId, cached);
+      } else {
+        uncachedUserIds.push(session.userId);
       }
+    }
 
+    if (uncachedUserIds.length > 0) {
+      const allFriends = await client.getAllFriendIds();
+      for (const userId of uncachedUserIds) {
+        const isFriend = allFriends.has(userId);
+        friendStatus.set(userId, isFriend);
+        await this.state.storage.put(`friend:${userId}`, isFriend);
+      }
+    }
+
+    for (const session of sessions) {
+      const isFriend = friendStatus.get(session.userId);
       if (!isFriend) continue;
 
       const messages = await client.readChatMessages(session.userId);
@@ -248,7 +255,7 @@ export class VerificationManager implements DurableObject {
     });
     const now = Date.now();
 
-    for (const [key, session] of entries) {
+    for (const [, session] of entries) {
       if (!session.verified && session.expiresAt <= now) {
         if (session.callbackUrl) {
           const payload: CallbackPayload = {
@@ -260,9 +267,7 @@ export class VerificationManager implements DurableObject {
           await sendWebhook(session.callbackUrl, payload, this.env.API_KEY);
         }
 
-        await this.state.storage.delete(key);
-        await this.state.storage.delete(`session_by_user:${session.userId}`);
-        await this.state.storage.delete(`friend:${session.userId}`);
+        await this.deleteSessionInternal(session.id);
         console.log(`[verification] Session ${session.id} expired for user ${session.userId}`);
       }
     }
