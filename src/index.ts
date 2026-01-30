@@ -5,12 +5,10 @@ import type {
   SessionStatusResponse,
   ErrorResponse,
   Session,
-  RateLimitStatus,
 } from "./types";
 import { validateCallbackUrl } from "./utils/validation";
 
 export { VerificationManager } from "./durable-objects/VerificationManager";
-export { UserRateLimiter } from "./durable-objects/UserRateLimiter";
 
 function corsHeaders(): HeadersInit {
   return {
@@ -57,13 +55,16 @@ export default {
       return errorResponse("Unauthorized", 401);
     }
 
-    if (url.pathname === "/api/v1/verify/start" && request.method === "POST") {
+    if (request.method === "POST" && url.pathname === "/api/v1/verify/start") {
       return handleStartVerification(request, env);
     }
 
-    const statusMatch = url.pathname.match(/^\/api\/v1\/verify\/status\/(.+)$/);
-    if (statusMatch && request.method === "GET") {
-      return handleGetStatus(statusMatch[1], env);
+    const statusPrefix = "/api/v1/verify/status/";
+    if (request.method === "GET" && url.pathname.startsWith(statusPrefix)) {
+      const sessionId = url.pathname.slice(statusPrefix.length);
+      if (sessionId) {
+        return handleGetStatus(sessionId, env);
+      }
     }
 
     return errorResponse("Not Found", 404);
@@ -100,25 +101,6 @@ async function handleStartVerification(
     }
   }
 
-  const rateLimiterId = env.USER_RATE_LIMITER.idFromName(userId);
-  const rateLimiter = env.USER_RATE_LIMITER.get(rateLimiterId);
-
-  const maxTokens = env.RATE_LIMIT_PER_HOUR || "3";
-  const rateLimitResponse = await rateLimiter.fetch(
-    new Request(`http://internal/check?maxTokens=${maxTokens}`, {
-      method: "POST",
-    })
-  );
-
-  const rateLimitStatus = (await rateLimitResponse.json()) as RateLimitStatus;
-  if (!rateLimitStatus.allowed) {
-    const resetDate = new Date(rateLimitStatus.resetAt);
-    return errorResponse(
-      `Rate limit exceeded. Try again after ${resetDate.toISOString()}`,
-      429
-    );
-  }
-
   const managerId = env.VERIFICATION_MANAGER.idFromName("singleton");
   const manager = env.VERIFICATION_MANAGER.get(managerId);
 
@@ -132,6 +114,11 @@ async function handleStartVerification(
       }),
     })
   );
+
+  if (sessionResponse.status === 429) {
+    const error = (await sessionResponse.json()) as ErrorResponse;
+    return errorResponse(error.error, 429);
+  }
 
   if (!sessionResponse.ok) {
     return errorResponse("Failed to create verification session", 500);

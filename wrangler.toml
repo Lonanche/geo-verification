@@ -5,13 +5,16 @@ keep_vars = true
 
 [durable_objects]
 bindings = [
-  { name = "VERIFICATION_MANAGER", class_name = "VerificationManager" },
-  { name = "USER_RATE_LIMITER", class_name = "UserRateLimiter" }
+  { name = "VERIFICATION_MANAGER", class_name = "VerificationManager" }
 ]
 
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["VerificationManager", "UserRateLimiter"]
+
+[[migrations]]
+tag = "v2"
+deleted_classes = ["UserRateLimiter"]
 
 # Variables set via Cloudflare Dashboard (keep_vars = true preserves them on deploy):
 # - CODE_EXPIRY_MINUTES

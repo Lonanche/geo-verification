@@ -9,7 +9,13 @@ import {
 interface VerificationManagerEnv {
   GEOGUESSR_NCFA_TOKEN: string;
   CODE_EXPIRY_MINUTES: string;
+  RATE_LIMIT_PER_HOUR: string;
   API_KEY?: string;
+}
+
+interface RateLimitState {
+  tokens: number;
+  lastRefill: number;
 }
 
 export class VerificationManager implements DurableObject {
@@ -31,7 +37,8 @@ export class VerificationManager implements DurableObject {
 
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
-    const { method, pathname } = { method: request.method, pathname: url.pathname };
+    const method = request.method;
+    const pathname = url.pathname;
 
     if (method === "POST" && pathname === "/session") {
       return this.createSession(request);
@@ -55,6 +62,15 @@ export class VerificationManager implements DurableObject {
       userId: string;
       callbackUrl?: string;
     };
+
+    const rateLimitResult = await this.checkRateLimit(body.userId);
+    if (!rateLimitResult.allowed) {
+      const resetDate = new Date(rateLimitResult.resetAt).toISOString();
+      return new Response(
+        JSON.stringify({ error: `Rate limit exceeded. Try again after ${resetDate}` }),
+        { status: 429, headers: { "Content-Type": "application/json" } }
+      );
+    }
 
     const existingSessionId = await this.state.storage.get<string>(
       `session_by_user:${body.userId}`
@@ -133,6 +149,33 @@ export class VerificationManager implements DurableObject {
     if (!currentAlarm) {
       await this.state.storage.setAlarm(Date.now() + 30000);
     }
+  }
+
+  private async checkRateLimit(userId: string): Promise<{ allowed: boolean; resetAt: number }> {
+    const maxTokens = parseInt(this.env.RATE_LIMIT_PER_HOUR || "3", 10);
+    const refillInterval = 60 * 60 * 1000;
+    const now = Date.now();
+
+    const stored = await this.state.storage.get<RateLimitState>(`ratelimit:${userId}`);
+    const state: RateLimitState = stored ?? { tokens: maxTokens, lastRefill: now };
+
+    if (stored) {
+      const elapsed = now - state.lastRefill;
+      const tokensToAdd = Math.floor(elapsed / refillInterval) * maxTokens;
+      if (tokensToAdd > 0) {
+        state.tokens = Math.min(maxTokens, state.tokens + tokensToAdd);
+        state.lastRefill = now;
+      }
+    }
+
+    const resetAt = state.lastRefill + refillInterval;
+    if (state.tokens <= 0) {
+      return { allowed: false, resetAt };
+    }
+
+    state.tokens--;
+    await this.state.storage.put(`ratelimit:${userId}`, state);
+    return { allowed: true, resetAt };
   }
 
   async alarm(): Promise<void> {

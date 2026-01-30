@@ -1,6 +1,5 @@
 export interface Env {
   VERIFICATION_MANAGER: DurableObjectNamespace;
-  USER_RATE_LIMITER: DurableObjectNamespace;
   GEOGUESSR_NCFA_TOKEN: string;
   API_KEY: string;
   CODE_EXPIRY_MINUTES: string;
@@ -87,10 +86,4 @@ export interface CallbackPayload {
 
 export interface ErrorResponse {
   error: string;
-}
-
-export interface RateLimitStatus {
-  allowed: boolean;
-  remaining: number;
-  resetAt: number;
 }
