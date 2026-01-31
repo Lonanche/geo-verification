@@ -101,7 +101,7 @@ async function handleStartVerification(
     }
   }
 
-  const managerId = env.VERIFICATION_MANAGER.idFromName("singleton");
+  const managerId = env.VERIFICATION_MANAGER.idFromName("manager", { locationHint: "weur" });
   const manager = env.VERIFICATION_MANAGER.get(managerId);
 
   const sessionResponse = await manager.fetch(
@@ -136,7 +136,7 @@ async function handleStartVerification(
 }
 
 async function handleGetStatus(sessionId: string, env: Env): Promise<Response> {
-  const managerId = env.VERIFICATION_MANAGER.idFromName("singleton");
+  const managerId = env.VERIFICATION_MANAGER.idFromName("manager", { locationHint: "weur" });
   const manager = env.VERIFICATION_MANAGER.get(managerId);
 
   const sessionResponse = await manager.fetch(
