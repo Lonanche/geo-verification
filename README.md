@@ -99,7 +99,7 @@ X-API-Key: your-api-key
 
 {
   "user_id": "geoguessr-user-id",
-  "callback_url": "https://your-domain.com/webhook"  // optional
+  "callback_url": "https://your-domain.com/webhook"  // optional, host must be in ALLOWED_CALLBACK_HOSTS
 }
 ```
 
@@ -107,7 +107,7 @@ Response:
 ```json
 {
   "session_id": "uuid",
-  "verification_code": "ABC123",
+  "verification_code": "A1F2B3",
   "expires_at": "2024-01-01T00:00:00.000Z"
 }
 ```
@@ -145,7 +145,9 @@ Response:
 
 ### Webhook Callback
 
-If `callback_url` is provided, a POST request is sent when verification completes or expires:
+If `callback_url` is provided, a POST request is sent when verification completes or expires.
+
+The request includes an `X-Webhook-Signature` header with an HMAC-SHA256 signature of the body using your API key as the secret (format: `sha256=<hex>`).
 
 ```json
 {
@@ -187,5 +189,4 @@ This prevents cost from malicious requests - they're blocked at Cloudflare's edg
 
 - **Cloudflare Workers** - Serverless compute
 - **Durable Objects** - State management
-  - `VerificationManager` - Sessions, friend requests, chat monitoring
-  - `UserRateLimiter` - Per-user rate limiting with token bucket algorithm
+  - `VerificationManager` - Sessions, friend requests, chat monitoring, rate limiting

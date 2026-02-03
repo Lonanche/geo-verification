@@ -79,7 +79,9 @@ paths:
                 callback_url:
                   type: string
                   format: uri
-                  description: Optional webhook URL to receive verification status updates
+                  description: |
+                    Optional webhook URL to receive verification status updates.
+                    Must use HTTP or HTTPS, and the host must be in the server's allowed callback hosts list.
                   example: "https://yourdomain.com/webhook"
       responses:
         '200':
@@ -96,8 +98,9 @@ paths:
                     example: "550e8400-e29b-41d4-a716-446655440000"
                   verification_code:
                     type: string
-                    description: 6-character verification code to be sent via DM
-                    example: "ABC123"
+                    pattern: "^[0-9A-F]{6}$"
+                    description: 6-character uppercase hex verification code to be sent via DM
+                    example: "A1F2B3"
                   expires_at:
                     type: string
                     format: date-time
@@ -113,9 +116,21 @@ paths:
                 missing_user_id:
                   value:
                     error: "user_id is required"
-                invalid_callback:
+                empty_user_id:
                   value:
-                    error: "Invalid callback URL"
+                    error: "user_id cannot be empty"
+                invalid_json:
+                  value:
+                    error: "Invalid JSON body"
+                invalid_callback_format:
+                  value:
+                    error: "Invalid callback URL format"
+                invalid_callback_protocol:
+                  value:
+                    error: "Callback URL must use HTTP or HTTPS"
+                callback_host_not_allowed:
+                  value:
+                    error: "Callback host 'example.com' is not in allowed hosts list"
         '401':
           description: Unauthorized - Invalid or missing API key
           content:
