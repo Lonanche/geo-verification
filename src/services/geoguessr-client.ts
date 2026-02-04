@@ -108,16 +108,6 @@ export class GeoGuessrClient {
     return data.messages || [];
   }
 
-  async isLoggedIn(): Promise<boolean> {
-    const url = `${BASE_URL}/accounts/me`;
-    const response = await fetch(url, {
-      headers: this.getHeaders(),
-      signal: AbortSignal.timeout(30000),
-    });
-
-    return response.ok;
-  }
-
   private delay(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
   }

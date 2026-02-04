@@ -92,8 +92,10 @@ export class VerificationManager implements DurableObject {
       callbackUrl: body.callbackUrl,
     };
 
-    await this.state.storage.put(`session:${session.id}`, session);
-    await this.state.storage.put(`session_by_user:${body.userId}`, session.id);
+    await this.state.storage.put({
+      [`session:${session.id}`]: session,
+      [`session_by_user:${body.userId}`]: session.id,
+    });
 
     await this.ensureAlarmScheduled();
 
@@ -113,7 +115,7 @@ export class VerificationManager implements DurableObject {
     }
 
     if (Date.now() > session.expiresAt && !session.verified) {
-      await this.deleteSessionInternal(sessionId);
+      await this.deleteSessionInternal(sessionId, session);
       return new Response(JSON.stringify({ error: "Session expired" }), {
         status: 404,
         headers: { "Content-Type": "application/json" },
@@ -128,14 +130,15 @@ export class VerificationManager implements DurableObject {
     return new Response(null, { status: 204 });
   }
 
-  private async deleteSessionInternal(sessionId: string): Promise<void> {
-    const session = await this.state.storage.get<Session>(
-      `session:${sessionId}`
-    );
+  private async deleteSessionInternal(sessionId: string, existingSession?: Session): Promise<void> {
+    const session = existingSession ??
+      (await this.state.storage.get<Session>(`session:${sessionId}`));
     if (session) {
-      await this.state.storage.delete(`session:${sessionId}`);
-      await this.state.storage.delete(`session_by_user:${session.userId}`);
-      await this.state.storage.delete(`friend:${session.userId}`);
+      await this.state.storage.delete([
+        `session:${sessionId}`,
+        `session_by_user:${session.userId}`,
+        `friend:${session.userId}`,
+      ]);
     }
   }
 
@@ -179,49 +182,47 @@ export class VerificationManager implements DurableObject {
   }
 
   async alarm(): Promise<void> {
-    try {
-      await this.processPendingFriendRequests();
-      await this.monitorChatMessages();
-      await this.handleExpiredSessions();
-    } catch (error) {
-      console.error("[verification] Error in alarm handler:", error);
-    }
-
-    const activeSessions = await this.getActiveSessions();
-    if (activeSessions.length > 0) {
-      await this.state.storage.setAlarm(Date.now() + 30000);
-    }
-  }
-
-  private async getActiveSessions(): Promise<Session[]> {
-    const entries = await this.state.storage.list<Session>({
-      prefix: "session:",
-    });
-    const sessions: Session[] = [];
+    const entries = await this.state.storage.list<Session>({ prefix: "session:" });
     const now = Date.now();
+    const activeSessions: Session[] = [];
+    const expiredSessions: Session[] = [];
 
     for (const [, session] of entries) {
-      if (!session.verified && session.expiresAt > now) {
-        sessions.push(session);
+      if (session.verified) continue;
+      if (session.expiresAt > now) {
+        activeSessions.push(session);
+      } else {
+        expiredSessions.push(session);
       }
     }
 
-    return sessions;
+    await Promise.allSettled([
+      this.processPendingFriendRequests(),
+      this.monitorChatMessages(activeSessions),
+      this.handleExpiredSessions(expiredSessions),
+    ]);
+
+    if (activeSessions.length > 0) {
+      await this.state.storage.setAlarm(Date.now() + 30000);
+    }
   }
 
   private async processPendingFriendRequests(): Promise<void> {
     const client = this.getClient();
     const pendingRequests = await client.getPendingFriendRequests();
 
+    const userKeys = pendingRequests.map(r => `session_by_user:${r.userId}`);
+    const userSessionMap = await this.state.storage.get<string>(userKeys);
+
+    const sessionIds = [...userSessionMap.values()].filter(Boolean);
+    const sessionKeys = sessionIds.map(id => `session:${id}`);
+    const sessionsMap = await this.state.storage.get<Session>(sessionKeys);
+
     for (const request of pendingRequests) {
-      const sessionId = await this.state.storage.get<string>(
-        `session_by_user:${request.userId}`
-      );
+      const sessionId = userSessionMap.get(`session_by_user:${request.userId}`);
       if (!sessionId) continue;
 
-      const session = await this.state.storage.get<Session>(
-        `session:${sessionId}`
-      );
+      const session = sessionsMap.get(`session:${sessionId}`);
       if (!session || session.verified || Date.now() > session.expiresAt) continue;
 
       const accepted = await client.acceptFriendRequest(request.userId);
@@ -232,16 +233,17 @@ export class VerificationManager implements DurableObject {
     }
   }
 
-  private async monitorChatMessages(): Promise<void> {
-    const client = this.getClient();
-    const sessions = await this.getActiveSessions();
+  private async monitorChatMessages(sessions: Session[]): Promise<void> {
     if (sessions.length === 0) return;
+    const client = this.getClient();
 
     const uncachedUserIds: string[] = [];
     const friendStatus = new Map<string, boolean>();
 
+    const friendKeys = sessions.map(s => `friend:${s.userId}`);
+    const cachedFriends = await this.state.storage.get<boolean>(friendKeys);
     for (const session of sessions) {
-      const cached = await this.state.storage.get<boolean>(`friend:${session.userId}`);
+      const cached = cachedFriends.get(`friend:${session.userId}`);
       if (cached !== undefined) {
         friendStatus.set(session.userId, cached);
       } else {
@@ -251,13 +253,16 @@ export class VerificationManager implements DurableObject {
 
     if (uncachedUserIds.length > 0) {
       const allFriends = await client.getAllFriendIds();
+      const friendEntries: Record<string, boolean> = {};
       for (const userId of uncachedUserIds) {
         const isFriend = allFriends.has(userId);
         friendStatus.set(userId, isFriend);
-        await this.state.storage.put(`friend:${userId}`, isFriend);
+        friendEntries[`friend:${userId}`] = isFriend;
       }
+      await this.state.storage.put(friendEntries);
     }
 
+    // TODO: Could parallelize readChatMessages calls if GeoGuessr API rate limits allow it
     for (const session of sessions) {
       const isFriend = friendStatus.get(session.userId);
       if (!isFriend) continue;
@@ -273,17 +278,7 @@ export class VerificationManager implements DurableObject {
         if (msg.textPayload && msg.textPayload.toUpperCase().includes(session.code)) {
           session.verified = true;
           await this.state.storage.put(`session:${session.id}`, session);
-
-          if (session.callbackUrl) {
-            const payload: CallbackPayload = {
-              session_id: session.id,
-              user_id: session.userId,
-              status: "verified",
-              timestamp: new Date().toISOString(),
-            };
-            await sendWebhook(session.callbackUrl, payload, this.env.API_KEY);
-          }
-
+          this.sendSessionWebhook(session, "verified");
           await this.state.storage.delete(`friend:${session.userId}`);
           console.log(`[verification] Session ${session.id} verified for user ${session.userId}`);
           break;
@@ -292,27 +287,32 @@ export class VerificationManager implements DurableObject {
     }
   }
 
-  private async handleExpiredSessions(): Promise<void> {
-    const entries = await this.state.storage.list<Session>({
-      prefix: "session:",
-    });
-    const now = Date.now();
+  private sendSessionWebhook(session: Session, status: CallbackPayload["status"]): void {
+    if (!session.callbackUrl) return;
+    const payload: CallbackPayload = {
+      session_id: session.id,
+      user_id: session.userId,
+      status,
+      timestamp: new Date().toISOString(),
+    };
+    console.log(`[verification] Sending ${status} webhook for session ${session.id}`);
+    this.state.waitUntil(sendWebhook(session.callbackUrl, payload, this.env.API_KEY));
+  }
 
-    for (const [, session] of entries) {
-      if (!session.verified && session.expiresAt <= now) {
-        if (session.callbackUrl) {
-          const payload: CallbackPayload = {
-            session_id: session.id,
-            user_id: session.userId,
-            status: "expired",
-            timestamp: new Date().toISOString(),
-          };
-          await sendWebhook(session.callbackUrl, payload, this.env.API_KEY);
-        }
+  private async handleExpiredSessions(expiredSessions: Session[]): Promise<void> {
+    if (expiredSessions.length === 0) return;
+    const keysToDelete: string[] = [];
 
-        await this.deleteSessionInternal(session.id);
-        console.log(`[verification] Session ${session.id} expired for user ${session.userId}`);
-      }
+    for (const session of expiredSessions) {
+      this.sendSessionWebhook(session, "expired");
+      keysToDelete.push(
+        `session:${session.id}`,
+        `session_by_user:${session.userId}`,
+        `friend:${session.userId}`,
+      );
+      console.log(`[verification] Session ${session.id} expired for user ${session.userId}`);
     }
+
+    await this.state.storage.delete(keysToDelete);
   }
 }
