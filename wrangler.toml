@@ -16,6 +16,9 @@ new_sqlite_classes = ["VerificationManager", "UserRateLimiter"]
 tag = "v2"
 deleted_classes = ["UserRateLimiter"]
 
+[triggers]
+crons = ["0 4 * * *"]
+
 # Variables set via Cloudflare Dashboard (keep_vars = true preserves them on deploy):
 # - CODE_EXPIRY_MINUTES
 # - RATE_LIMIT_PER_HOUR

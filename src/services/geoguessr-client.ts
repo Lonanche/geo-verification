@@ -88,6 +88,23 @@ export class GeoGuessrClient {
     return true;
   }
 
+  async removeFriend(userId: string): Promise<boolean> {
+    const url = `${BASE_URL}/social/friends/${userId}`;
+    const response = await fetch(url, {
+      method: "DELETE",
+      headers: this.getHeaders(),
+      body: "{}",
+      signal: AbortSignal.timeout(30000),
+    });
+
+    if (!response.ok) {
+      console.error(`[geoguessr] Failed to remove friend ${userId}: ${response.status}`);
+      return false;
+    }
+
+    return true;
+  }
+
   async readChatMessages(userId: string): Promise<ChatMessage[] | null> {
     const url = `${BASE_URL_V4}/chat/${userId}`;
     const response = await fetch(url, {

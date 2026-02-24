@@ -13,6 +13,9 @@ interface VerificationManagerEnv {
   API_KEY?: string;
 }
 
+const FRIEND_EXPIRY_MS = 7 * 24 * 60 * 60 * 1000;
+const CLEANUP_BATCH_SIZE = 3;
+
 interface RateLimitState {
   tokens: number;
   lastRefill: number;
@@ -52,6 +55,10 @@ export class VerificationManager implements DurableObject {
 
     if (method === "POST" && pathname === "/start-alarm") {
       return this.startAlarm();
+    }
+
+    if (method === "POST" && pathname === "/cleanup-friends") {
+      return this.cleanupStaleFriends();
     }
 
     return new Response("Not Found", { status: 404 });
@@ -196,6 +203,8 @@ export class VerificationManager implements DurableObject {
       }
     }
 
+    const queueRemaining = await this.processCleanupQueue();
+
     await Promise.allSettled([
       this.processPendingFriendRequests(),
       this.monitorChatMessages(activeSessions),
@@ -204,6 +213,8 @@ export class VerificationManager implements DurableObject {
 
     if (activeSessions.length > 0) {
       await this.state.storage.setAlarm(Date.now() + 30000);
+    } else if (queueRemaining) {
+      await this.state.storage.setAlarm(Date.now() + 60000);
     }
   }
 
@@ -227,7 +238,10 @@ export class VerificationManager implements DurableObject {
 
       const accepted = await client.acceptFriendRequest(request.userId);
       if (accepted) {
-        await this.state.storage.put(`friend:${request.userId}`, true);
+        await this.state.storage.put({
+          [`friend:${request.userId}`]: true,
+          [`friended_at:${request.userId}`]: Date.now(),
+        });
         console.log(`[verification] Accepted friend request from ${request.userId}`);
       }
     }
@@ -285,6 +299,82 @@ export class VerificationManager implements DurableObject {
         }
       }
     }
+  }
+
+  private async cleanupStaleFriends(): Promise<Response> {
+    const client = this.getClient();
+    const now = Date.now();
+
+    const allFriendIds = await client.getAllFriendIds();
+    if (allFriendIds.size === 0) {
+      return new Response("No friends to clean up", { status: 200 });
+    }
+
+    const sessions = await this.state.storage.list<Session>({ prefix: "session:" });
+    const activeUserIds = new Set<string>();
+    for (const [, session] of sessions) {
+      if (!session.verified && session.expiresAt > now) {
+        activeUserIds.add(session.userId);
+      }
+    }
+
+    const timestamps = await this.state.storage.list<number>({ prefix: "friended_at:" });
+    const queue: string[] = [];
+    const backfills: Record<string, number> = {};
+
+    for (const userId of allFriendIds) {
+      if (activeUserIds.has(userId)) continue;
+
+      const friendedAt = timestamps.get(`friended_at:${userId}`);
+      if (!friendedAt) {
+        backfills[`friended_at:${userId}`] = now;
+      } else if (now - friendedAt >= FRIEND_EXPIRY_MS) {
+        queue.push(userId);
+      }
+    }
+
+    if (Object.keys(backfills).length > 0) {
+      await this.state.storage.put(backfills);
+    }
+
+    if (queue.length === 0) {
+      console.log("[cleanup] No stale friends to remove");
+      return new Response("No stale friends", { status: 200 });
+    }
+
+    console.log(`[cleanup] Queued ${queue.length} stale friends for removal`);
+    await this.state.storage.put("cleanup_queue", queue);
+    await this.ensureAlarmScheduled();
+
+    return new Response(`Queued ${queue.length} friends for removal`, { status: 200 });
+  }
+
+  private async processCleanupQueue(): Promise<boolean> {
+    const queue = await this.state.storage.get<string[]>("cleanup_queue");
+    if (!queue?.length) return false;
+
+    const client = this.getClient();
+    const batch = queue.splice(0, CLEANUP_BATCH_SIZE);
+
+    for (const userId of batch) {
+      const removed = await client.removeFriend(userId);
+      if (removed) {
+        await this.state.storage.delete([
+          `friended_at:${userId}`,
+          `friend:${userId}`,
+        ]);
+        console.log(`[cleanup] Removed friend ${userId}`);
+      }
+    }
+
+    if (queue.length > 0) {
+      await this.state.storage.put("cleanup_queue", queue);
+    } else {
+      await this.state.storage.delete("cleanup_queue");
+      console.log("[cleanup] Queue finished");
+    }
+
+    return queue.length > 0;
   }
 
   private sendSessionWebhook(session: Session, status: CallbackPayload["status"]): void {

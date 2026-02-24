@@ -10,6 +10,12 @@ import { validateCallbackUrl } from "./utils/validation";
 
 export { VerificationManager } from "./durable-objects/VerificationManager";
 
+function getManager(env: Env): DurableObjectStub {
+  return env.VERIFICATION_MANAGER.get(
+    env.VERIFICATION_MANAGER.idFromName("singleton")
+  );
+}
+
 function corsHeaders(): HeadersInit {
   return {
     "Access-Control-Allow-Origin": "*",
@@ -40,6 +46,11 @@ function errorResponse(error: string, status: number): Response {
 }
 
 export default {
+  async scheduled(_event: ScheduledEvent, env: Env): Promise<void> {
+    const manager = getManager(env);
+    await manager.fetch(new Request("http://internal/cleanup-friends", { method: "POST" }));
+  },
+
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
 
@@ -101,8 +112,7 @@ async function handleStartVerification(
     }
   }
 
-  const managerId = env.VERIFICATION_MANAGER.idFromName("singleton");
-  const manager = env.VERIFICATION_MANAGER.get(managerId);
+  const manager = getManager(env);
 
   const sessionResponse = await manager.fetch(
     new Request("http://internal/session", {
@@ -136,8 +146,7 @@ async function handleStartVerification(
 }
 
 async function handleGetStatus(sessionId: string, env: Env): Promise<Response> {
-  const managerId = env.VERIFICATION_MANAGER.idFromName("singleton");
-  const manager = env.VERIFICATION_MANAGER.get(managerId);
+  const manager = getManager(env);
 
   const sessionResponse = await manager.fetch(
     new Request(`http://internal/session/${sessionId}`, {
